@@ -1,0 +1,379 @@
+            'Llenamos los Datos Personales del Formulario
+            .Cells(1, 16).Value = LiquidacionFinalGanancias.txtPeriodo.Text
+            .Cells(1, 22).Value = "X"
+            Set rstBuscarSlave = New ADODB.Recordset
+            SQL = "Select * From AGENTES Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "'"
+            rstBuscarSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            .Cells(4, 22).Value = Format(rstBuscarSlave!CUIL, "00-00000000-0")
+            .Cells(6, 14).Value = rstBuscarSlave!NombreCompleto
+            .Cells(10, 14).Value = "CORRIENTES (CAPITAL)"
+            .Cells(10, 21).Value = "CORRIENTES"
+            .Cells(10, 28).Value = "3400"
+            rstBuscarSlave.Close
+            Set rstBuscarSlave = Nothing
+            .Cells(17, 1).Value = "INSTITUTO DE VIVIENDA DE CORRIENTES"
+            .Cells(17, 14).Value = "30-63235151-4"
+            .Cells(17, 26).Interior.ColorIndex = 1
+            If LiquidacionFinalGanancias.optLiquidacionAnual.Value = True Then
+                .Cells(25, 6).Interior.ColorIndex = 1
+                .Cells(25, 14).Value = "01/01/" & LiquidacionFinalGanancias.txtPeriodo.Text
+                .Cells(25, 18).Value = "31/12/" & LiquidacionFinalGanancias.txtPeriodo.Text
+            Else
+                .Cells(25, 4).Interior.ColorIndex = 1
+                Set rstRegistroSlave = New ADODB.Recordset
+                SQL = "Select * From CODIGOLIQUIDACIONES Inner Join LIQUIDACIONSUELDOS On CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+                & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' " _
+                & "Order by CODIGOLIQUIDACION Asc"
+                rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                rstRegistroSlave.MoveFirst
+                .Cells(25, 14).Value = "01/" & rstRegistroSlave!PERIODO
+                rstRegistroSlave.MoveLast
+                datFechaFin = DateSerial(Right(rstRegistroSlave!PERIODO, 4), Left(rstRegistroSlave!PERIODO, 2), 1)
+                datFechaFin = DateAdd("m", 1, datFecha)
+                datFechaFin = DateAdd("d", -1, datFecha)
+                .Cells(25, 18).Value = Day(datFecha) & "/" & rstRegistroSlave!PERIODO
+                rstRegistroSlave.Close
+                Set rstRegistroSlave = Nothing
+            End If
+            'Determinamos Fecha Inicio y Fecha Fin
+            datFechaInicio = DateSerial(Right(.Cells(25, 14).Value, 4), Mid(.Cells(25, 14).Value, 4, 2), Left(.Cells(25, 14).Value, 2))
+            datFechaFin = DateSerial(Right(.Cells(25, 18).Value, 4), Mid(.Cells(25, 18).Value, 4, 2), Left(.Cells(25, 18).Value, 2))
+            'Completamos importe Mínimo Imponible
+            intMesesLiquidados = 12
+            dblImporteMensual = ImporteDeduccionPersonal("MINIMONOIMPONIBLE", datFechaFin)
+            .Cells(48, 26).Value = dblImporteMensual * intMesesLiquidados
+            'Completamos importe Deducción Especial
+            dblImporteMensual = ImporteDeduccionPersonal("DEDUCCIONESPECIAL", datFechaFin)
+            .Cells(49, 26).Value = dblImporteMensual * intMesesLiquidados
+            'Completamos importe Conyuge
+            If TieneConyugeDeducible(LiquidacionFinalGanancias.txtPuestoLaboral.Text) = True Then
+                dblImporteMensual = ImporteDeduccionPersonal("CONYUGE", datFechaFin)
+                .Cells(51, 26).Value = dblImporteMensual * intMesesLiquidados
+            Else
+                .Cells(51, 26).Value = 0
+            End If
+            'Completamos importe Hijos
+            For i = 1 To 12
+                intFamiliares = intFamiliares + CantidadHijosDeducibles(LiquidacionFinalGanancias.txtPuestoLaboral.Text, DateSerial(Year(datFechaInicio), i, 1))
+            Next i
+            If intFamiliares > 0 Then
+                dblImporteMensual = ImporteDeduccionPersonal("HIJO", datFechaFin)
+                .Cells(52, 26).Value = dblImporteMensual * intFamiliares
+            Else
+                .Cells(52, 26).Value = 0
+            End If
+            'Completamos importe OtrasCargas
+            intFamiliares = CantidadOtrasCargasFamiliaDeducibles(LiquidacionFinalGanancias.txtPuestoLaboral.Text)
+            If intFamiliares > 0 Then
+                dblImporteMensual = ImporteDeduccionPersonal("OTRASCARGASDEFAMILIA", datFechaFin)
+                .Cells(53, 26).Value = dblImporteMensual * intFamiliares * intMesesLiquidados
+            Else
+                .Cells(53, 26).Value = 0
+            End If
+            'Completamos importe Total Deducciones Personales
+            .Cells(54, 26).Value = .Cells(48, 26).Value + .Cells(49, 26).Value + .Cells(51, 26).Value + .Cells(52, 26).Value + .Cells(53, 26).Value
+            'Cargamos Importe Haber Òptimo
+            Set rstRegistroSlave = New ADODB.Recordset
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' " _
+            & "And LIQUIDACIONSUELDOS.CODIGOCONCEPTO = '0115' "
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            .Cells(28, 26).Value = rstRegistroSlave!SumaImporte
+            rstRegistroSlave.Close
+            'Cargamos Importe Pluriempleo
+            SQL = "Select Sum(LIQUIDACIONGANANCIAS4TACATEGORIA.PLURIEMPLEO) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONGANANCIAS4TACATEGORIA ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONGANANCIAS4TACATEGORIA.CodigoLiquidacion " _
+            & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "'"
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            If rstRegistroSlave!SumaImporte > 0 Then
+                .Cells(31, 26).Value = rstRegistroSlave!SumaImporte
+            Else
+                .Cells(31, 26).Value = 0
+            End If
+            rstRegistroSlave.Close
+            'Calculamos Importe Bruto de Ganancias
+            .Cells(35, 26).Value = .Cells(28, 26).Value + .Cells(31, 26).Value
+            'Cargamos Importe Jubilación
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' " _
+            & "And LIQUIDACIONSUELDOS.CODIGOCONCEPTO = '0208' "
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            .Cells(37, 26).Value = rstRegistroSlave!SumaImporte
+            rstRegistroSlave.Close
+            'Cargamos Importe Obra Social
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' " _
+            & "And LIQUIDACIONSUELDOS.CODIGOCONCEPTO = '0212' "
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            .Cells(38, 26).Value = rstRegistroSlave!SumaImporte
+            rstRegistroSlave.Close
+            'Cargamos Importe Adherente Obra Social
+            SQL = "Select Sum(LIQUIDACIONGANANCIAS4TACATEGORIA.ADHERENTEOBRASOCIAL) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONGANANCIAS4TACATEGORIA ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONGANANCIAS4TACATEGORIA.CodigoLiquidacion " _
+            & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "'"
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            If rstRegistroSlave!SumaImporte > 0 Then
+                SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+                & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+                & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' " _
+                & "And LIQUIDACIONSUELDOS.CODIGOCONCEPTO = '0234'"
+                Set rstBuscarSlave = New ADODB.Recordset
+                rstBuscarSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                If rstRegistroSlave!SumaImporte <= rstBuscarSlave!SumaImporte Then
+                    .Cells(38, 26).Value = .Cells(38, 26).Value + rstRegistroSlave!SumaImporte
+                Else
+                    .Cells(38, 26).Value = .Cells(38, 26).Value + rstBuscarSlave!SumaImporte
+                End If
+                rstBuscarSlave.Close
+                Set rstBuscarSlave = Nothing
+            End If
+            rstRegistroSlave.Close
+            'Cargamos Importe Seguro de Vida Optativo
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where ((PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0317') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0361') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0367') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0370') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0373') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0374'))"
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            If IsNull(rstRegistroSlave!SumaImporte) = True Then
+                .Cells(39, 26).Value = 0
+                .Cells(74, 26).Value = 0
+                .Cells(75, 26).Value = 0
+                rstRegistroSlave.Close
+            Else
+                dblImporteControl = rstRegistroSlave!SumaImporte
+                rstRegistroSlave.Close
+                SQL = "Select SEGURODEVIDA From IMPORTEDEDUCCIONESGENERALES Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' " _
+                & "And FECHA <= # " & Format(datFechaFin, "MM/DD/YYYY") & " # Order by FECHA Desc"
+                If SQLNoMatch(SQL) = False Then
+                    rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                    dblImporteControl = dblImporteControl + (rstRegistroSlave!SeguroDeVida / 12 * Month(datFechaFin))
+                    rstRegistroSlave.Close
+                End If
+                SQL = "Select SEGURODEVIDA From DEDUCCIONES4TACATEGORIA Where FECHA <= #" & Format(datFechaFin, "MM/DD/YYYY") & "# Order by FECHA Desc"
+                rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                If rstRegistroSlave!SeguroDeVida >= dblImporteControl Then
+                    .Cells(39, 26).Value = dblImporteControl
+                    .Cells(74, 26).Value = dblImporteControl
+                    .Cells(75, 26).Value = dblImporteControl
+                Else
+                    .Cells(39, 26).Value = rstRegistroSlave!SeguroDeVida
+                    .Cells(74, 26).Value = rstRegistroSlave!SeguroDeVida
+                    .Cells(75, 26).Value = rstRegistroSlave!SeguroDeVida
+                End If
+                rstRegistroSlave.Close
+            End If
+            'Gasto de Sepelio (NO TENIDO EN CUENTA)
+            .Cells(40, 26).Value = 0
+            .Cells(78, 26).Value = 0
+            .Cells(80, 26).Value = 0
+            'Gastos estimativos de corredores y viajantes de comercio (NO TENIDO EN CUENTA)
+            .Cells(41, 26).Value = 0
+            'Cargamos Importe Seguro de Vida Obligatorio
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where ((PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0360') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0366') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0369'))"
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            If IsNull(rstRegistroSlave!SumaImporte) = True Then
+                .Cells(42, 26).Value = 0
+                rstRegistroSlave.Close
+            Else
+                .Cells(42, 26).Value = rstRegistroSlave!SumaImporte
+                .Cells(88, 3).Value = "Decreto Ley Nª 30/2000 - Seg.Vida Oblig."
+                .Cells(88, 21).Value = rstRegistroSlave!SumaImporte
+                .Cells(88, 26).Value = rstRegistroSlave!SumaImporte
+                rstRegistroSlave.Close
+            End If
+            'Cargamos Importe Cuota Sindical
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) As SumaImporte " _
+            & "From CODIGOLIQUIDACIONES INNER JOIN LIQUIDACIONSUELDOS ON CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where ((PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0219') Or " _
+            & "(PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0227'))"
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            If IsNull(rstRegistroSlave!SumaImporte) = False Then
+                .Cells(42, 26).Value = .Cells(42, 26).Value + rstRegistroSlave!SumaImporte
+                If Trim(.Cells(88, 26).Value) = "" Then
+                    .Cells(88, 3).Value = "Ley 23551 Art. 37 - Cuota Sindical"
+                    .Cells(88, 21).Value = rstRegistroSlave!SumaImporte
+                    .Cells(88, 26).Value = rstRegistroSlave!SumaImporte
+                Else
+                    .Cells(89, 3).Value = "Ley 23551 Art. 37 - Cuota Sindical"
+                    .Cells(89, 21).Value = rstRegistroSlave!SumaImporte
+                    .Cells(89, 26).Value = rstRegistroSlave!SumaImporte
+                End If
+            End If
+            rstRegistroSlave.Close
+            'Cargamos Importe ServicioDomestico
+            dblImporteMensual = ImporteDeduccionGeneral(LiquidacionFinalGanancias.txtPuestoLaboral.Text, "SERVICIODOMESTICO", datFechaFin)
+            If dblImporteMensual > 0 Then
+                SQL = "Select SERVICIODOMESTICO From IMPORTEDEDUCCIONESGENERALES Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' " _
+                & "And FECHA <= # " & Format(datFechaFin, "MM/DD/YYYY") & " # Order by FECHA Desc"
+                rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                dblImporteControl = (rstRegistroSlave!ServicioDomestico / 12 * Month(datFechaFin))
+                rstRegistroSlave.Close
+                SQL = "Select SERVICIODOMESTICO From DEDUCCIONES4TACATEGORIA Where FECHA <= #" & Format(datFechaFin, "MM/DD/YYYY") & "# Order by FECHA Desc"
+                rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                If rstRegistroSlave!ServicioDomestico >= dblImporteControl Then
+                    .Cells(42, 26).Value = .Cells(42, 26).Value + dblImporteControl
+                    If Trim(.Cells(89, 26).Value) = "" Then
+                        If Trim(.Cells(88, 26).Value) = "" Then
+                            .Cells(88, 3).Value = "Ley 26063 Art. 16 - Servicio Doméstico"
+                            .Cells(88, 21).Value = dblImporteControl
+                            .Cells(88, 26).Value = dblImporteControl
+                        Else
+                            .Cells(89, 3).Value = "Ley 26063 Art. 16 - Servicio Doméstico"
+                            .Cells(89, 21).Value = dblImporteControl
+                            .Cells(89, 26).Value = dblImporteControl
+                        End If
+                    Else
+                        .Cells(90, 3).Value = "Ley 26063 Art. 16 - Servicio Doméstico"
+                        .Cells(90, 21).Value = dblImporteControl
+                        .Cells(90, 26).Value = dblImporteControl
+                    End If
+                Else
+                    .Cells(42, 26).Value = .Cells(42, 26).Value + rstRegistroSlave!ServicioDomestico
+                    If Trim(.Cells(89, 26).Value) = "" Then
+                        If Trim(.Cells(88, 26).Value) = "" Then
+                            .Cells(88, 3).Value = "Ley 26063 Art. 16 - Servicio Doméstico"
+                            .Cells(88, 21).Value = rstRegistroSlave!ServicioDomestico
+                            .Cells(88, 26).Value = rstRegistroSlave!ServicioDomestico
+                        Else
+                            .Cells(89, 3).Value = "Ley 26063 Art. 16 - Servicio Doméstico"
+                            .Cells(89, 21).Value = rstRegistroSlave!ServicioDomestico
+                            .Cells(89, 26).Value = rstRegistroSlave!ServicioDomestico
+                        End If
+                    Else
+                        .Cells(90, 3).Value = "Ley 26063 Art. 16 - Servicio Doméstico"
+                        .Cells(90, 21).Value = rstRegistroSlave!ServicioDomestico
+                        .Cells(90, 26).Value = rstRegistroSlave!ServicioDomestico
+                    End If
+                End If
+                rstRegistroSlave.Close
+            End If
+            'Obtenemos la Ganancia Neta antes de Donaciones, Honorarios Médicos y Cuota Médico Asistencial
+            dblGananciaNeta = .Cells(35, 26).Value - .Cells(37, 26).Value - .Cells(38, 26).Value - .Cells(39, 26).Value _
+            - .Cells(40, 26).Value - .Cells(41, 26).Value - .Cells(42, 26).Value - .Cells(54, 26).Value
+            'Cargamos Importe Cuota Médico Asistencial
+            dblImporteControl = ImporteDeduccionGeneral(LiquidacionFinalGanancias.txtPuestoLaboral.Text, "CUOTAMEDICOASISTENCIAL", datFechaFin, dblGananciaNeta)
+            If dblImporteControl > 0 Then
+                .Cells(38, 26).Value = .Cells(38, 26).Value + dblImporteControl
+                .Cells(69, 26).Value = dblImporteControl
+                .Cells(71, 26).Value = dblImporteControl
+            Else
+                .Cells(69, 26).Value = 0
+                .Cells(71, 26).Value = 0
+            End If
+            'Cargamos Importe Donaciones
+            dblImporteControl = ImporteDeduccionGeneral(LiquidacionFinalGanancias.txtPuestoLaboral.Text, "DONACIONES", datFechaFin, dblGananciaNeta)
+            If dblImporteControl > 0 Then
+                .Cells(45, 26).Value = dblImporteControl
+                .Cells(83, 26).Value = dblImporteControl
+                .Cells(85, 26).Value = dblImporteControl
+                SQL = "Select DONACIONES From IMPORTEDEDUCCIONESGENERALES Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' " _
+                & "And FECHA <= # " & Format(datFechaFin, "MM/DD/YYYY") & " # Order by FECHA Desc"
+                rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+                .Cells(83, 17).Value = (rstRegistroSlave!Donaciones / 12 * Month(datFechaFin))
+                .Cells(83, 21) = .Cells(83, 17) - .Cells(83, 26)
+                rstRegistroSlave.Close
+            Else
+                .Cells(45, 26).Value = 0
+                .Cells(83, 26).Value = 0
+                .Cells(85, 26).Value = 0
+            End If
+            'Cargamos Importe Honorarios Médicos
+            dblImporteControl = ImporteDeduccionGeneral(LiquidacionFinalGanancias.txtPuestoLaboral.Text, "HONORARIOSMEDICOS", datFechaFin, dblGananciaNeta)
+            If dblImporteControl > 0 Then
+                .Cells(42, 26).Value = .Cells(42, 26).Value + dblImporteControl
+                If Trim(.Cells(89, 26).Value) = "" Then
+                    If Trim(.Cells(88, 26).Value) = "" Then
+                        .Cells(88, 3).Value = "Honorarios Médicos"
+                        .Cells(88, 21).Value = dblImporteControl
+                        .Cells(88, 26).Value = dblImporteControl
+                    Else
+                        .Cells(89, 3).Value = "Honorarios Médicos"
+                        .Cells(89, 21).Value = dblImporteControl
+                        .Cells(89, 26).Value = dblImporteControl
+                    End If
+                Else
+                    .Cells(90, 3).Value = "Honorarios Médicos"
+                    .Cells(90, 21).Value = dblImporteControl
+                    .Cells(90, 26).Value = dblImporteControl
+                End If
+            End If
+            'Calculamos Total Otras Deducciones
+            .Cells(91, 26).Value = .Cells(88, 26).Value + .Cells(89, 26).Value + .Cells(90, 26).Value
+            'Calculamos Total del Rubro 2
+            .Cells(43, 26).Value = .Cells(37, 26).Value + .Cells(38, 26).Value + .Cells(39, 26).Value _
+            + .Cells(40, 26).Value + .Cells(41, 26).Value + .Cells(42, 26).Value
+            'Calculamos Resultado Neto
+            .Cells(44, 26).Value = .Cells(35, 26).Value - .Cells(43, 26).Value
+            'Calculamos Diferencia Rubro 3 - Rubro 4
+            .Cells(46, 26).Value = .Cells(44, 26).Value - .Cells(45, 26).Value
+            'Calculamos Ganancia Neta Sujeta a Impuesto
+            .Cells(55, 26).Value = .Cells(46, 26).Value - .Cells(54, 26).Value
+            'Calculamos Impuesto Determinado
+            If .Cells(55, 26).Value < 0 Then
+                .Cells(56, 26).Value = 0
+            Else
+                SQL = "Select * From ESCALAAPLICABLEGANANCIAS Order by IMPORTEMAXIMO Asc"
+                rstRegistroSlave.Open SQL, dbSlave, adOpenDynamic, adLockOptimistic
+                If rstRegistroSlave.BOF = False Then
+                    rstRegistroSlave.MoveFirst
+                    Do While rstRegistroSlave.EOF = False
+                        If rstRegistroSlave!ImporteMaximo > .Cells(55, 26).Value Then
+                            dblPorcentajeAplicable = rstRegistroSlave!ImporteVariable
+                            Exit Do
+                        End If
+                        rstRegistroSlave.MoveNext
+                    Loop
+                    If rstRegistroSlave!ImporteFijo = 0 Then
+                        .Cells(56, 26).Value = .Cells(55, 26).Value * rstRegistroSlave!ImporteVariable
+                    Else
+                        .Cells(56, 26).Value = rstRegistroSlave!ImporteFijo
+                        rstRegistroSlave.MovePrevious
+                        .Cells(56, 26).Value = .Cells(56, 26).Value + ((.Cells(55, 26).Value - rstRegistroSlave!ImporteMaximo) * dblPorcentajeAplicable)
+                    End If
+                End If
+                rstRegistroSlave.Close
+            End If
+            'Determinamos la Retención Acumulada
+            SQL = "Select Sum(LIQUIDACIONSUELDOS.IMPORTE) AS SumaDeImporte " _
+            & "From CODIGOLIQUIDACIONES Inner Join LIQUIDACIONSUELDOS On CODIGOLIQUIDACIONES.Codigo = LIQUIDACIONSUELDOS.CodigoLiquidacion " _
+            & "Where PUESTOLABORAL = '" & LiquidacionFinalGanancias.txtPuestoLaboral.Text & "' " _
+            & "And Right(PERIODO,4) = '" & LiquidacionFinalGanancias.txtPeriodo.Text & "' And CODIGOCONCEPTO = '0276'"
+            rstRegistroSlave.Open SQL, dbSlave, adOpenForwardOnly, adLockOptimistic
+            If rstRegistroSlave.BOF = False And IsNull(rstRegistroSlave!SumaDeImporte) = False Then
+                .Cells(58, 26).Value = rstRegistroSlave!SumaDeImporte
+                .Cells(59, 26).Value = 0
+                .Cells(60, 26).Value = rstRegistroSlave!SumaDeImporte
+            Else
+                .Cells(58, 26).Value = 0
+                .Cells(59, 26).Value = 0
+                .Cells(60, 26).Value = 0
+            End If
+            rstRegistroSlave.Close
+            'Determinamos Saldo a Favor
+            Select Case .Cells(56, 26).Value - .Cells(60, 26).Value
+            Case Is = 0
+                .Cells(62, 26).Value = 0
+                .Cells(63, 26).Value = 0
+            Case Is < 0
+                .Cells(62, 26).Value = 0
+                .Cells(63, 26).Value = .Cells(60, 26).Value - .Cells(56, 26).Value
+                .Cells(64, 7).Value = .Cells(60, 26).Value - .Cells(56, 26).Value
+            Case Is > 0
+                .Cells(62, 26).Value = .Cells(56, 26).Value - .Cells(60, 26).Value
+                .Cells(63, 26).Value = 0
+                .Cells(64, 7).Value = .Cells(56, 26).Value - .Cells(60, 26).Value
+            End Select
+            Set rstRegistroSlave = Nothing
+                
+        End With

@@ -1,0 +1,122 @@
+Public Function CalcularDeduccionPersonalEspecificaSIRADIG(ID As String, DenominacionSLAVE As String, _
+PuestoLaboral As String, CodigoLiquidacion As String, Optional GciaNeta As Double = 0) As Double
+
+    Dim SQL As String
+    Dim strPeriodo As String
+    Dim datFecha As Date
+    Dim datFechaControl As Date
+    Dim inPrincipio As Integer
+    Dim inFin As Integer
+    Dim strDenominacionSISPER As String
+    Dim dblImporteMensual As Double
+    Dim dblImporteLimite As Double
+    Dim dblImporteAcumulado As Double
+    Dim dblImporteCalculado As Double
+    
+    dblImporteMensual = 0
+    dblImporteLimite = 0
+    dblImporteAcumulado = 0
+    dblImporteCalculado = 0
+    
+    strPeriodo = BuscarPeriodoLiquidacion(CodigoLiquidacion)
+    datFecha = BuscarUltimoDiaDelPeriodo(strPeriodo)
+    
+    Select Case DenominacionSLAVE
+    Case "MinimoNoImponible", "DeduccionEspecial"
+        '1) Debemos buscar el límite legal para la deducción
+        dblImporteMensual = ImporteDeduccionPersonal(DenominacionSLAVE, DateSerial(Year(datFecha) - 1, 12, 31))
+        SQL = "Select " & DenominacionSLAVE & " From DEDUCCIONES4TACATEGORIA Where FECHA <= #" & Format(datFecha, "MM/DD/YYYY") & "# " _
+        & "And Year(FECHA) = '" & Year(datFecha) & "' Order by FECHA Desc"
+        If SQLNoMatch(SQL) = True Then
+            dblImporteCalculado = dblImporteMensual * Month(datFecha)
+        Else
+            For i = 1 To Month(datFecha)
+                datFechaControl = DateSerial(Year(datFecha), i, 1)
+                datFechaControl = DateAdd("m", 1, datFechaControl)
+                datFechaControl = DateAdd("d", -1, datFechaControl)
+                dblImporteMensual = ImporteDeduccionPersonal(DenominacionSLAVE, datFechaControl)
+                dblImporteLimite = dblImporteLimite + dblImporteMensual
+            Next i
+            datFechaControl = 0
+        End If
+        If DenominacionSLAVE = "DeduccionEspecial" Then
+            If GciaNeta < dblImporteLimite Then
+                dblImporteLimite = GciaNeta
+            End If
+        End If
+    Case Else
+        If ID = "Ninguno" Then
+            dblImporteCalculado = 0
+        Else
+            '1) Debemos determinar si hay Cargas de Familia declaradas por F572 Web
+            SQL = "Select * From CargasFamiliaSIRADIG Where "
+            Select Case DenominacionSLAVE
+            Case "Conyuge"
+            SQL = SQL & "(ID = '" & ID & "' " _
+            & "And CodigoParentesco = '1')"
+            Case "Hijo"
+            SQL = SQL & "(ID = '" & ID & "' " _
+            & "And CodigoParentesco = '3') OR " _
+            & "(ID = '" & ID & "' " _
+            & "And CodigoParentesco = '30') OR " _
+            & "(ID = '" & ID & "' " _
+            & "And CodigoParentesco = '31') OR " _
+            & "(ID = '" & ID & "' " _
+            & "And CodigoParentesco = '32')"
+            Case "OtrasCargasDeFamilia"
+            SQL = SQL & "(ID = '" & ID & "' " _
+            & "And CodigoParentesco = '35')"
+            End Select
+            If SQLNoMatch(SQL) = True Then
+                dblImporteCalculado = 0
+            Else
+                '2) En caso de que haya cargas de familia informadas por F 572 Web, _
+                debemos buscar el límite legal para la deducción
+                Set rstRegistroSlave = New ADODB.Recordset
+                rstRegistroSlave.Open SQL, dbSlave, adOpenDynamic, adLockOptimistic
+                While rstRegistroSlave.EOF = False
+                    'Determinamos el mes de inicio de la carga de familia
+                    inPrincipio = rstRegistroSlave!MesDesde
+                    'Determinamos el mes de Fin de la carga de familia
+                    inFin = rstRegistroSlave!MesHasta
+                    If inFin > Month(datFecha) Then
+                        inFin = Month(datFecha)
+                    End If
+                    'Procedemos en la medida que el mes de inicio sea menor al mes que estamos liquidando
+                    If inPrincipio < Month(datFecha) Then
+                        dblImporteMensual = ImporteDeduccionPersonal(DenominacionSLAVE, DateSerial(Year(datFecha) - 1, 12, 31))
+                        SQL = "Select " & DenominacionSLAVE & " From DEDUCCIONES4TACATEGORIA Where FECHA <= #" & Format(datFecha, "MM/DD/YYYY") & "# " _
+                        & "And Year(FECHA) = '" & Year(datFecha) & "' Order by FECHA Desc"
+                        If SQLNoMatch(SQL) = True Then
+                            dblImporteLimite = dblImporteMensual * (inFin - inPrincipio + 1)
+                        Else
+                            For i = inPrincipio To inFin
+                                datFechaControl = DateSerial(Year(datFecha), i, 1)
+                                datFechaControl = DateAdd("m", 1, datFechaControl)
+                                datFechaControl = DateAdd("d", -1, datFechaControl)
+                                dblImporteMensual = ImporteDeduccionPersonal(DenominacionSLAVE, datFechaControl)
+                                dblImporteLimite = dblImporteLimite + dblImporteMensual
+                            Next i
+                        End If
+                    End If
+                    rstRegistroSlave.MoveNext
+                Wend
+                rstRegistroSlave.Close
+                Set rstRegistroSlave = Nothing
+            End If
+        End If
+    End Select
+    '3) debemos determinar el importe ya registrado hasta la liquidación previa y comparar con 2) (sacar diferencia)
+    dblImporteAcumulado = ImporteRegistradoAcumuladoDeduccionEspecifica(DenominacionSLAVE, _
+    PuestoLaboral, strPeriodo, CodigoLiquidacion, False)
+    dblImporteCalculado = dblImporteLimite - dblImporteAcumulado
+    
+    CalcularDeduccionPersonalEspecificaSIRADIG = Round(dblImporteCalculado, 2)
+    
+    SQL = ""
+    dblImporteCalculado = 0
+    
+End Function
+
+26072017101076327100034331407331933880600151VELAZQUEZ BACILIO MAGNO                    1BASICO                   000000358827030000006814073319338803214073319338803201422030001003019870140061949
+2606201730107632710003433280151VELAZQUEZ BACILIO MAGNO                  150SUELDO ANUAL COMPLEMENTA.000001252963030001407331933881000000001422000001003019870142017614917984583686140733193389981
